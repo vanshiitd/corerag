@@ -16,6 +16,13 @@ dependencies = [
     "pymupdf>=1.24",
     "fastembed>=0.4",
     "tiktoken>=0.7",
+    "sentence-transformers[onnx]>=3.3",
+    "langgraph>=0.2",
+    "langchain>=0.3",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.2",
+    "langchain-groq>=0.2",
+    "langfuse>=3.0",
 ]
 
 [dependency-groups]
@@ -25,6 +32,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "pre-commit>=3.7",
+    "python-dotenv>=1.0",
 ]
 
 # This is an application, not a distributable library: uv manages the venv and
@@ -55,6 +63,23 @@ module = ["pymupdf.*"]
 follow_imports = "skip"
 ignore_missing_imports = true
 
+# StateGraph.add_node's generic overloads fail to resolve against a node function
+# passed through any typed indirection (a Callable-typed variable, a factory
+# function's return value) -- confirmed via isolated repro to be a mypy/langgraph
+# overload-resolution limitation, not a real error (the runtime behavior, and
+# LangGraph's own documented builder-function pattern, are both correct).
+[[tool.mypy.overrides]]
+module = ["langgraph.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
+# CrossEncoder.predict()'s multimodal (text/image/audio/video) signature doesn't
+# type-check cleanly against simple (str, str) pairs; treat it as untyped.
+[[tool.mypy.overrides]]
+module = ["sentence_transformers.*"]
+follow_imports = "skip"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 minversion = "8.0"
 addopts = "-ra -q -m 'not integration'"
@@ -62,7 +87,7 @@ testpaths = ["tests"]
 pythonpath = ["."]
 asyncio_mode = "auto"
 markers = [
-    "integration: requires running services (qdrant/redis/grobid/langfuse)",
+    "integration: requires running services (qdrant/redis/grobid/langfuse) or slow/heavy resources (e.g. loading an ML model)",
 ]
 filterwarnings = [
     "ignore:Using `httpx` with `starlette.testclient` is deprecated:",

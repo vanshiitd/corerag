@@ -6,7 +6,20 @@ from typing import cast
 
 import redis.asyncio as aioredis
 from fastapi import Request
+from langgraph.graph.state import CompiledStateGraph
 from qdrant_client import AsyncQdrantClient
+
+from core.config import Settings
+
+
+def get_settings(request: Request) -> Settings:
+    """Return the process-wide settings singleton."""
+    return cast(Settings, request.app.state.settings)
+
+
+def get_graph(request: Request) -> CompiledStateGraph:
+    """Return the process-wide compiled agent graph."""
+    return cast(CompiledStateGraph, request.app.state.graph)
 
 
 def get_qdrant(request: Request) -> AsyncQdrantClient:

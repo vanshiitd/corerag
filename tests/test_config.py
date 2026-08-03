@@ -21,7 +21,7 @@ def test_defaults_match_locked_decisions() -> None:
     assert s.agent_model == "gpt-4o-mini"
     assert s.generation_model.startswith("llama-3.3")
     # Locked retrieval / cache knobs
-    assert s.retrieval_k == 50
+    assert s.retrieval_k == 30
     assert s.rerank_top_n == 5
     assert s.cache_similarity_threshold == 0.95
     assert s.max_reflection_retries == 2

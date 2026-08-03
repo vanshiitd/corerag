@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import router
 from core import __version__
+from core.agents.graph import build_graph
 from core.clients import make_qdrant_client, make_redis_client
 from core.config import get_settings
 from core.logging import configure_logging
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.qdrant = make_qdrant_client(settings)
     app.state.redis = make_redis_client(settings)
+    app.state.graph = build_graph(app.state.qdrant, settings)
     log.info(
         "startup",
         qdrant=settings.qdrant_url,

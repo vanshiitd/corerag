@@ -92,12 +92,22 @@ class Settings(BaseSettings):
 
     # ---- Reranker: local cross-encoder --------------------------------------
     reranker_model: str = "Alibaba-NLP/gte-reranker-modernbert-base"
-    reranker_mode: Literal["cpu-onnx", "gpu", "service"] = "cpu-onnx"
+    # Default is pytorch-cpu, not cpu-onnx: benchmarked on Apple M5, ONNX Runtime's
+    # generic CPU EP was ~1.7-2x SLOWER than PyTorch's native CPU backend for this
+    # ModernBERT architecture (across fp32/int8/uint8/quantized variants alike --
+    # not a quantization issue), and CoreML EP crashed/hung under the async +
+    # asyncio.to_thread pattern this service actually uses. Re-benchmark on the
+    # eventual x86 cloud host (P6) -- this may not hold there.
+    reranker_mode: Literal["pytorch-cpu", "cpu-onnx", "gpu", "service"] = "pytorch-cpu"
+    reranker_onnx_file: str = "onnx/model_int8.onnx"
     reranker_service_url: str | None = None
     reranker_max_length: int = Field(default=512, ge=1)
 
     # ---- Retrieval: two-stage -----------------------------------------------
-    retrieval_k: int = Field(default=50, ge=1)  # hybrid candidates from Qdrant (stage 1)
+    # 30, not 50: P2.4 benchmark showed reranking K=50 costs ~5.9s p50 (true CPU,
+    # not accelerated) vs ~3.9s at K=30 -- a meaningful latency win for a modest
+    # recall tradeoff, reranking a 6x funnel down to rerank_top_n=5.
+    retrieval_k: int = Field(default=30, ge=1)  # hybrid candidates from Qdrant (stage 1)
     rerank_top_n: int = Field(default=5, ge=1)  # survivors after rerank (stage 2)
 
     # ---- LLM: generation (Groq) ---------------------------------------------
@@ -137,10 +147,13 @@ class Settings(BaseSettings):
     # ---- GROBID (ingestion only) --------------------------------------------
     grobid_url: str = "http://localhost:8070"
 
-    # ---- Langfuse (observability; optional) ---------------------------------
+    # ---- Langfuse (observability; optional; Cloud, not self-hosted -- see
+    # PLAN.md P3 replan) ------------------------------------------------------
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
-    langfuse_host: str = "http://localhost:3000"
+    # LANGFUSE_BASE_URL, not LANGFUSE_HOST -- confirmed against langfuse/skills
+    # docs 2026-08-03; the old field name silently ignored the env var.
+    langfuse_base_url: str = "https://us.cloud.langfuse.com"
 
     # ---- Derived ------------------------------------------------------------
     @property
