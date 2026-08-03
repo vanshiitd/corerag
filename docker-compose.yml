@@ -19,8 +19,12 @@ services:
     # the host (GET :6333/readyz) and by the app's /health endpoint.
 
   # ---- Cache + semantic cache backing store -------------------------------
+  # 8.x, not 7.4: Redis 8 Community Edition bundles RediSearch (FT.* commands)
+  # natively, which RedisVL's SemanticCache (P4) requires for vector indexing.
+  # Confirmed empirically -- 7.4 raised "unknown command 'FT._LIST'" (no separate
+  # redis-stack image needed; 8.x-alpine is barely bigger than 7.4-alpine).
   redis:
-    image: redis:7.4-alpine
+    image: redis:8-alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
       - "6379:6379"

@@ -12,6 +12,7 @@ dependencies = [
     "structlog>=24.1",
     "qdrant-client>=1.10",
     "redis>=5.0",
+    "redisvl>=0.3",
     "arxiv>=2.1",
     "pymupdf>=1.24",
     "fastembed>=0.4",
@@ -54,7 +55,7 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["arxiv.*", "fastembed.*", "tokenizers.*"]
+module = ["arxiv.*", "fastembed.*", "tokenizers.*", "redisvl.*"]
 ignore_missing_imports = true
 
 # PyMuPDF ships partial type hints that trip strict mode; treat it as untyped.

@@ -23,6 +23,7 @@ from api.schemas import (
     SearchTimings,
 )
 from core import __version__
+from core.cache import CachedAnswer, check_cache_async, store_in_cache_async
 from core.clients import check_qdrant, check_redis
 from core.config import Settings
 from core.reranker import rerank_async
@@ -112,16 +113,35 @@ def _sse(event: str, data: object) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _chunk_words(text: str) -> list[str]:
+    """Split into word(+space) pieces for a cache hit's simulated token stream --
+    same event shape as real generation, fired rapidly with no artificial delay,
+    so client-side parsing needs no special case for a hit vs a miss."""
+    words = text.split(" ")
+    return [f"{w} " for w in words[:-1]] + (words[-1:] if words else [])
+
+
+async def _stream_cached(cached: CachedAnswer) -> AsyncIterator[str]:
+    """Replay a cache hit as the same token/sources SSE shapes as a real run."""
+    for piece in _chunk_words(cached.answer):
+        yield _sse("token", {"content": piece})
+    yield _sse("sources", {"citations": [c.model_dump() for c in cached.citations]})
+
+
 async def _stream_query(
     graph: CompiledStateGraph, settings: Settings, query: str
 ) -> AsyncIterator[str]:
     """Yield SSE events: a 'token' event per generated token (from the *generate*
     node only -- router/grader also stream their own raw structured-output JSON,
     which must not leak into the user-facing answer), then one final 'sources'
-    event once the graph completes."""
+    event once the graph completes. Writes through to the cache before that final
+    yield (not after) -- guaranteed to run as long as the client stayed connected
+    through the token stream, unlike code placed after the last yield, which a
+    client disconnecting right at the end could skip entirely."""
     handler = get_tracing_handler(settings)
     callbacks = [handler] if handler else []
     citations: list[ScoredChunk] = []
+    answer = ""
 
     async for event in graph.astream_events(
         {"query": query, "original_query": query, "retries": 0},
@@ -134,7 +154,12 @@ async def _stream_query(
             if content:
                 yield _sse("token", {"content": content})
         elif event["event"] == "on_chain_end" and node == "generate":
-            citations = event["data"]["output"].get("citations", [])
+            output = event["data"]["output"]
+            citations = output.get("citations", [])
+            answer = output.get("answer", "")
+
+    if answer:
+        await store_in_cache_async(query, answer, citations, settings)
 
     yield _sse("sources", {"citations": [c.model_dump() for c in citations]})
 
@@ -143,9 +168,15 @@ async def _stream_query(
 async def query(body: QueryRequest, graph: GraphDep, settings: SettingsDep) -> StreamingResponse:
     """Agentic query endpoint: streams a grounded, cited answer via SSE.
 
-    No semantic-cache interceptor here -- that's P4's job, layered in front of
-    this later.
+    Checks the semantic cache first -- a hit skips the graph entirely (no
+    LLM/retrieval calls) and streams the cached answer/citations in the same SSE
+    shapes; a miss runs the full graph, then writes through after the stream.
     """
-    return StreamingResponse(
-        _stream_query(graph, settings, body.query), media_type="text/event-stream"
-    )
+    cached = await check_cache_async(body.query, settings)
+    if cached is not None:
+        log.info("query.cache_hit", query=body.query[:80])
+        stream = _stream_cached(cached)
+    else:
+        log.info("query.cache_miss", query=body.query[:80])
+        stream = _stream_query(graph, settings, body.query)
+    return StreamingResponse(stream, media_type="text/event-stream")

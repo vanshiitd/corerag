@@ -35,7 +35,10 @@ async def check_redis(client: aioredis.Redis) -> tuple[bool, float, str | None]:
     """Ping Redis; return (ok, latency_ms, error_detail)."""
     start = time.perf_counter()
     try:
-        await client.ping()
+        # redis-py's ping() is typed `Awaitable[bool] | bool` on the shared
+        # sync/async command mixin (confirmed in its own source) -- imprecise for
+        # any single concrete client, not a real type error for this async one.
+        await client.ping()  # type: ignore[misc]
     except Exception as exc:
         return False, (time.perf_counter() - start) * 1000, str(exc)
     return True, (time.perf_counter() - start) * 1000, None
