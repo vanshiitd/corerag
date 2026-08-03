@@ -35,6 +35,10 @@ dev = [
     "pre-commit>=3.7",
     "python-dotenv>=1.0",
 ]
+eval = [
+    "ragas==0.3.9",
+    "rapidfuzz>=3.14.5",
+]
 
 # This is an application, not a distributable library: uv manages the venv and
 # dependencies but does not build/install the project itself.
@@ -55,7 +59,7 @@ strict = true
 warn_unused_configs = true
 
 [[tool.mypy.overrides]]
-module = ["arxiv.*", "fastembed.*", "tokenizers.*", "redisvl.*"]
+module = ["arxiv.*", "fastembed.*", "tokenizers.*", "redisvl.*", "ragas.*"]
 ignore_missing_imports = true
 
 # PyMuPDF ships partial type hints that trip strict mode; treat it as untyped.

@@ -31,7 +31,7 @@ log = structlog.get_logger()
 _CostTotals = dict[str, float]
 
 
-def _load_metadata(path: Path) -> list[PaperMeta]:
+def load_metadata(path: Path) -> list[PaperMeta]:
     return [
         PaperMeta.model_validate_json(line)
         for line in path.read_text().splitlines()
@@ -39,7 +39,12 @@ def _load_metadata(path: Path) -> list[PaperMeta]:
     ]
 
 
-def _parse_and_chunk(meta: PaperMeta, settings: Settings) -> tuple[ParsedDoc, list[Chunk]] | None:
+def parse_and_chunk(meta: PaperMeta, settings: Settings) -> tuple[ParsedDoc, list[Chunk]] | None:
+    """Parse + chunk one paper (contextualize_strategy-independent -- only the
+    ``context`` prefix varies by strategy, not chunk boundaries/text), so callers
+    that need multiple contextualize_strategy variants of the same paper (P5.5's
+    ablation) can parse once and reuse the result, rather than re-running GROBID
+    once per variant."""
     if not meta.pdf_path or not Path(meta.pdf_path).exists():
         log.warning("pipeline.skip_no_pdf", arxiv_id=meta.arxiv_id)
         return None
@@ -54,7 +59,7 @@ def _parse_and_chunk(meta: PaperMeta, settings: Settings) -> tuple[ParsedDoc, li
 def _dry_run(papers: list[PaperMeta], settings: Settings, start: float) -> None:
     totals: _CostTotals = {"calls": 0, "uncached_input": 0, "cached_input": 0, "usd": 0.0}
     for meta in papers:
-        parsed = _parse_and_chunk(meta, settings)
+        parsed = parse_and_chunk(meta, settings)
         if parsed is None:
             continue
         doc, chunks = parsed
@@ -83,7 +88,7 @@ def _ingest(
             skipped += 1
             log.info("pipeline.skip_already_indexed", arxiv_id=meta.arxiv_id)
             continue
-        parsed = _parse_and_chunk(meta, settings)
+        parsed = parse_and_chunk(meta, settings)
         if parsed is None:
             continue
         doc, chunks = parsed
@@ -118,7 +123,7 @@ def run(
     if fetch:
         papers = fetch_papers(settings, limit=limit)
     else:
-        papers = _load_metadata(Path(settings.arxiv_metadata_path))
+        papers = load_metadata(Path(settings.arxiv_metadata_path))
         if limit:
             papers = papers[:limit]
 

@@ -1,26 +1,31 @@
-"""Latency benchmark: retrieval + reranking (P2.4), and the full agent graph (P3.8).
+"""Latency benchmark: retrieval + reranking (P2.4), the full agent graph (P3.8),
+and semantic-cache hit-rate/speedup (P5.6).
 
 Run standalone:
     uv run python -m eval.latency_bench
     uv run python -m eval.latency_bench --k 30 50 100 --modes pytorch-cpu cpu-onnx
     uv run python -m eval.latency_bench --graph
+    uv run python -m eval.latency_bench --cache
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import statistics
 import time
 
 import structlog
 
 from core.agents.graph import build_graph
+from core.cache import check_cache_async, get_cache, store_in_cache_async
 from core.clients import make_qdrant_client
 from core.config import Settings, get_settings
 from core.logging import configure_logging
 from core.reranker import rerank
 from core.retrieval import hybrid_search
+from eval.retrieval_eval import load_golden_set
 
 log = structlog.get_logger()
 
@@ -190,6 +195,69 @@ async def benchmark_graph(
     return results
 
 
+async def benchmark_cache_hit_rate(
+    settings: Settings, questions: list[str], repeat_fraction: float = 0.5
+) -> dict[str, object]:
+    """Real hit-rate/speedup over a realistic query mix: each unique question is
+    asked once (a guaranteed miss -> real graph run -> write-through), then a
+    fraction of them are asked again in the same pass (a guaranteed hit) -- the
+    same check-then-generate-or-replay path api/routes.py's /query uses (P4.2),
+    exercised here end-to-end rather than assumed from the P4.2 spot-check.
+
+    Uses an isolated cache_version so this benchmark never touches the real cache
+    namespace used by manual/demo runs, and clears it before and after.
+    """
+    settings = settings.model_copy(update={"cache_version": "latency-bench-cache"})
+    cache = get_cache(settings)
+    with contextlib.suppress(Exception):
+        cache.clear()
+
+    client = make_qdrant_client(settings)
+    graph = build_graph(client, settings)
+    n_repeats = round(len(questions) * repeat_fraction)
+    sequence = questions + questions[:n_repeats]
+
+    hit_ms: list[float] = []
+    miss_ms: list[float] = []
+    try:
+        for query in sequence:
+            t0 = time.perf_counter()
+            cached = await check_cache_async(query, settings)
+            if cached is not None:
+                hit_ms.append((time.perf_counter() - t0) * 1000)
+                continue
+
+            state = await graph.ainvoke(
+                {"query": query, "original_query": query, "retries": 0},
+                config={"recursion_limit": 20},
+            )
+            answer = state.get("answer", "")
+            citations = state.get("citations", [])
+            if answer:
+                await store_in_cache_async(query, answer, citations, settings)
+            miss_ms.append((time.perf_counter() - t0) * 1000)
+    finally:
+        await client.close()
+        with contextlib.suppress(Exception):
+            cache.clear()
+
+    result: dict[str, object] = {
+        "n_queries": len(sequence),
+        "n_hits": len(hit_ms),
+        "n_misses": len(miss_ms),
+        "hit_rate": round(len(hit_ms) / len(sequence), 4) if sequence else 0.0,
+        "hit_p50_ms": round(statistics.median(hit_ms), 1) if hit_ms else None,
+        "miss_p50_ms": round(statistics.median(miss_ms), 1) if miss_ms else None,
+        "speedup_x": (
+            round(statistics.median(miss_ms) / statistics.median(hit_ms), 1)
+            if hit_ms and miss_ms
+            else None
+        ),
+    }
+    log.info("latency_bench.cache_result", **result)
+    return result
+
+
 async def run(
     k_values: list[int], modes: list[str], include_mps_bonus: bool = False
 ) -> dict[str, dict[int, dict[str, float]]]:
@@ -222,9 +290,19 @@ def _main() -> None:
     parser.add_argument(
         "--graph", action="store_true", help="benchmark the full agent graph instead of rerank"
     )
+    parser.add_argument(
+        "--cache", action="store_true", help="benchmark semantic-cache hit-rate/speedup"
+    )
+    parser.add_argument(
+        "--cache-n", type=int, default=10, help="number of unique golden questions to use"
+    )
     args = parser.parse_args()
     configure_logging(get_settings())
-    if args.graph:
+    if args.cache:
+        golden = load_golden_set()
+        questions = [s.question for s in golden[: args.cache_n]]
+        asyncio.run(benchmark_cache_hit_rate(get_settings(), questions))
+    elif args.graph:
         asyncio.run(benchmark_graph(get_settings()))
     else:
         asyncio.run(run(args.k, args.modes, include_mps_bonus=args.mps_bonus))
