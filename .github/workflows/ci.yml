@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    env:
+      GROQ_API_KEY: ci-dummy
+      OPENAI_API_KEY: ci-dummy
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync
+      - name: Lint (ruff)
+        run: uv run ruff check .
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+      - name: Type check (mypy)
+        run: uv run mypy .
+      - name: Unit tests
+        run: uv run pytest
+
+  integration:
+    runs-on: ubuntu-latest
+    env:
+      GROQ_API_KEY: ci-dummy
+      OPENAI_API_KEY: ci-dummy
+      QDRANT_URL: http://localhost:6333
+      REDIS_URL: redis://localhost:6379/0
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.18.0
+        ports: ["6333:6333"]
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync dependencies
+        run: uv sync
+      - name: Wait for Qdrant
+        run: curl -s --retry 30 --retry-delay 1 --retry-connrefused http://localhost:6333/readyz
+      - name: Integration tests
+        run: uv run pytest -m integration

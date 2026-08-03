@@ -1,0 +1,92 @@
+# CoreRAG local infrastructure.
+#   make up          -> core services (qdrant, redis)
+#   make up-obs      -> + observability (langfuse + postgres)   [profile: obs]
+#   make up-ingest   -> + PDF parsing (grobid)                  [profile: ingest]
+# Image tags are pinned for reproducibility; bump deliberately.
+name: corerag
+
+services:
+  # ---- Vector DB (dense + sparse hybrid) ----------------------------------
+  qdrant:
+    image: qdrant/qdrant:v1.18.0 # keep aligned with qdrant-client in uv.lock
+    ports:
+      - "6333:6333" # HTTP / REST
+      - "6334:6334" # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    # NOTE: the qdrant image ships no shell/curl, so readiness is checked from
+    # the host (GET :6333/readyz) and by the app's /health endpoint.
+
+  # ---- Cache + semantic cache backing store -------------------------------
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ---- Observability (optional) -------------------------------------------
+  langfuse-db:
+    image: postgres:16-alpine
+    profiles: ["obs"]
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_db:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse -d langfuse"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  langfuse:
+    image: langfuse/langfuse:2
+    profiles: ["obs"]
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: dev-secret-change-me
+      SALT: dev-salt-change-me
+      TELEMETRY_ENABLED: "false"
+    restart: unless-stopped
+
+  # ---- Scientific PDF parsing (ingestion only) ----------------------------
+  grobid:
+    # CRF-only variant: ~500MB vs ~12GB for the full deep-learning-model image.
+    # Skips the newer neural layout models but still extracts clean scientific
+    # structure (sections, references) -- plenty for chunking-quality purposes here.
+    # Memory: the JVM heap fragments/grows processing many PDFs sequentially in one
+    # process lifetime; 2g caused a real OutOfMemoryError partway through a 150-paper
+    # run (confirmed in container logs), silently degrading ~57% of papers to the
+    # PyMuPDF fallback. Raised to 5g and verified: 0 fallbacks / 0 restarts / 0 OOM
+    # across a full 150-paper run (was 86/150 fallbacks at 2g).
+    image: grobid/grobid:0.9.0-crf
+    profiles: ["ingest"]
+    ports:
+      - "8070:8070"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 5g
+
+volumes:
+  qdrant_data:
+  redis_data:
+  langfuse_db:

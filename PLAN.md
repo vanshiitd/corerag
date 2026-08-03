@@ -70,7 +70,7 @@ Every node is traced to **Langfuse** (latency + inputs/outputs), which doubles a
 | Dense embed (local) | `Alibaba-NLP/gte-base-en-v1.5` (verify FastEmbed support; else via `sentence-transformers`, `trust_remote_code=True`) | 768-d, 8k context, no query-prefix needed, $0/call |
 | Sparse (local) | FastEmbed `Qdrant/bm25` | lexical recall — critical for acronyms/method names |
 | Reranker (local) | `Alibaba-NLP/gte-reranker-modernbert-base` via sentence-transformers → ONNX/INT8 or GPU | K→N; benchmarked & tuned in P2 |
-| LLM — generation (cloud) | Groq Llama 3.3 (verify live ID) via config | low-latency token streaming |
+| LLM — generation (cloud) | Groq Llama 3.3 (`llama-3.3-70b-versatile`, confirmed live) via config | low-latency token streaming |
 | LLM — agents (cloud) | OpenAI `gpt-4o-mini` (router/grader) via config; `with_structured_output` + Pydantic validation-retry | reliable strict JSON for the state machine |
 | Semantic cache | RedisVL `SemanticCache` | threshold ~0.95, TTL, version-namespaced |
 | PDF parsing | GROBID (Docker) + PyMuPDF fallback | scientific structure (sections, refs) |
@@ -139,30 +139,36 @@ Each phase has a **goal**, **tasks**, **key decisions**, and **acceptance criter
 ### P0 — Foundations
 **Goal:** a running skeleton with all infra up, config-driven, observable. Broken into 13 steps across 4 checkpoints. Steps P0.1–P0.4 need no Docker.
 
-**Checkpoint A — Pure-Python skeleton (no Docker)**
+**Checkpoint A — Pure-Python skeleton (no Docker) — ✅ COMPLETE**
+*(uv 0.12 + managed Python 3.12; config validated; 12 tests green; ruff + mypy-strict clean.)*
 - **P0.1 Repo scaffold & deps.** `git init`; package dirs (`api/`, `core/`, `core/agents/`, `data/`, `eval/`, `tests/`, `scripts/`) with `__init__.py`; `pyproject.toml` (uv, runtime + dev groups); `.python-version` (3.12); `.gitignore`. *Done:* `uv sync` ok; `uv run python -c "import api, core"` exits 0.
 - **P0.2 Dev tooling.** `ruff` + `mypy` config in `pyproject.toml`; `Makefile` (`fmt`/`lint`/`type`/`test`/`up`/`down`/`serve`/`ingest`/`eval`); `.pre-commit-config.yaml`. *Done:* `make lint` and `make type` pass on the empty skeleton.
 - **P0.3 Config module.** `core/config.py`: pydantic-settings `Settings` with every locked value (gen/agents/embed/reranker IDs, K, N, rerank mode, cache threshold+TTL, retry cap, chunk size/overlap, arXiv categories+count+date-floor, collection version, service URLs, keys via env); cached singleton. *Done:* unit test loads from a sample `.env`, asserts defaults, and a malformed value raises `ValidationError`.
 - **P0.4 Env & secrets.** `.env.example` covering every field `config.py` reads (OPENAI/GROQ keys, Langfuse public/secret/host, Qdrant/Redis/GROBID URLs); confirm `.env` gitignored. *Done:* `cp .env.example .env` + keys → `Settings()` loads clean.
 
-**Checkpoint B — Infrastructure up (docker-compose)**
+**Checkpoint B — Infrastructure up (docker-compose) — ✅ core done**
+*(Qdrant v1.18.0 + Redis up & verified. P0.6 Langfuse configured but not yet run; P0.7 GROBID deferred to P1 to avoid a multi-GB pull.)*
 - **P0.5 Data plane.** `docker-compose.yml`: `qdrant` (pinned, volume, healthcheck, :6333) + `redis` (pinned, volume, :6379). *Done:* `docker compose up -d qdrant redis` → both healthy; `curl :6333/healthz` + `redis-cli ping` ok.
 - **P0.6 Observability.** Add `langfuse` + its `postgres` behind `profile: [obs]`. *Note:* Langfuse **v2** = Postgres-only (light, recommended for P0); **v3** also needs ClickHouse/Redis/Minio (heavier) — decide at build. *Done:* Langfuse UI reachable; project created; keys in `.env`.
 - **P0.7 Ingestion dep.** Add `grobid` (lightweight CRF image, mem limit, :8070) behind `profile: [ingest]` (not needed for serving). *Done:* `docker compose --profile ingest up -d grobid`; `curl :8070/api/isalive` → `true`.
 
-**Checkpoint C — App online & observable**
+**Checkpoint C — App online & observable — ✅ core done**
+*(FastAPI + `/health` live against Qdrant+Redis: 200 healthy / 503 degraded, verified; structured JSON logs. P0.10 Langfuse tracing deferred — meaningful at P3.)*
 - **P0.8 FastAPI skeleton.** `api/main.py` (app factory + `lifespan` building Qdrant/Redis clients from config), `api/deps.py` (DI), `api/schemas.py` (base models), JSON logging, CORS/middleware stub. *Done:* `make serve` boots; `/docs` renders; clients init from settings.
 - **P0.9 /health.** `GET /health` pings each dependency (Qdrant, Redis; optionally GROBID/Langfuse), returns per-dep + overall status. *Done:* all-up → `200` green; stop Redis → redis flips to down, overall degraded, no crash.
 - **P0.10 Langfuse tracing.** Wire client from config; instrument app + one trivial traced op. *Done:* a request produces a visible trace in the Langfuse UI.
 
-**Checkpoint D — Guardrails**
+**Checkpoint D — Guardrails — ✅**
+*(Integration test via `make test-int`; GitHub Actions CI (quality + service-container integration job); README with architecture diagrams.)*
 - **P0.11 Tests skeleton.** `tests/` + pytest config + `conftest.py` (settings override, TestClient); config unit test (P0.3) + `/health` integration test (marked as needing services). *Done:* `make test` green with services up; unit tests green without.
 - **P0.12 CI.** `.github/workflows/ci.yml`: uv → install → ruff → mypy → pytest (unit always; integration via Actions `services:` Qdrant+Redis, else skipped). Needs a GitHub remote. *Done:* workflow green on first push.
 - **P0.13 README + diagrams.** Quick-start (`make up`/`make serve`/`.env`), the two mermaid diagrams, service-ports table. *Done:* following it from scratch reaches a healthy `/health`.
 
 **Checkpoints:** A after P0.4 · B after P0.7 · C after P0.10 · D (P0 complete) after P0.13.
 
-### P1 — Ingestion pipeline
+### P1 — Ingestion pipeline — ✅ COMPLETE: real 150-paper corpus live in Qdrant
+*(fetch → **GROBID** parse (default; pymupdf fallback) → token chunk → **per-chunk LLM contextualization** (gpt-4o-mini, front-truncated doc budget for TPM safety) → local **bge-base-en-v1.5** dense + BM25 sparse → Qdrant hybrid upsert. Retrieval proven: a bare numeric table row, unfindable via raw text, is correctly surfaced (0.78 score) for a natural-language query thanks to its generated context. Cost: ~$0.025/3 papers -> ~$1.2 est. for 150. Dense embedder is bge, not gte — FastEmbed lacks gte-v1.5. GROBID uses the `0.9.0-crf` image (501MB, not the 12.5GB full image) and dramatically beats PyMuPDF's section detection (15-26 real sections vs. 1-2). cs.LG keyword filter tightened (dropped bare "LLM"/"large language model", which let non-systems papers slip through; added systems-specific phrases). ****The real (paid) 150-paper run is done: 150/150 papers, 5,227 chunks, cost ≈$1.56 (chunk count matches the dry-run's predicted call count exactly). Verified end-to-end with live hybrid retrieval -- top results for "reducing LLM inference latency" are precisely on-target AI-systems papers with accurate generated context.**
+Along the way, ingestion at real scale surfaced and fixed four real bugs (each caught by insisting on full-log/direct verification over trusting exit codes or summaries -- twice a misleading "success" masked a real failure): (1) tiktoken rejects literal special-token strings like `<|endoftext|>`, which a tokenization paper legitimately contains -- fixed via `disallowed_special=()`. (2) GROBID's 2g memory limit caused a real JVM OutOfMemoryError partway through 150 sequential PDFs, silently degrading 57% of papers to the worse PyMuPDF fallback -- fixed by raising to 5g (verified 0 fallbacks/0 OOM). (3) `is_paper_indexed`'s Qdrant `count(exact=False)` (approximate mode) returned a nonzero count for an arxiv_id that didn't exist -- would have skipped and never indexed all 150 papers -- fixed to `exact=True`. (4) Sustained real load exceeded the account's 200k TPM limit (retry-after-429 alone wasn't enough once demand was structurally above capacity) -- fixed with a proactive `_TokenBucket` rate limiter; a later run also crashed on an uncaught `httpx.ReadTimeout` (retry logic only handled HTTP status errors, not transport-level failures) -- fixed with a second exception handler. Idempotent resume (`is_paper_indexed` + skip logic) made every interruption safe -- no data loss, no double-billing, across 4 run attempts. One stale off-topic paper (indexed before the cs.LG keyword tightening) was found via a Qdrant-vs-metadata.jsonl set-diff and removed, leaving the corpus exactly matching the intended 150-paper query. 30 tests passing, mypy strict clean throughout.)*
 **Goal:** 150 papers → clean, contextualized, hybrid-indexed chunks in Qdrant.
 - `fetch_arxiv.py`: query categories (TBC — see §11), download PDFs + metadata (id, title, authors, date, url).
 - `parse.py`: GROBID → sections/paragraphs; PyMuPDF fallback; strip references/figure noise.
