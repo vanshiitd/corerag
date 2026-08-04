@@ -33,18 +33,20 @@ RUN chown corerag:corerag /app
 USER corerag
 
 # Dependency layer first (cache-friendly): pyproject.toml/uv.lock change far
-# less often than application code. uid/gid on the cache mount: BuildKit cache
-# mounts default to root-owned, which a non-root USER can't write into.
+# less often than application code. No --mount=type=cache here (would be a
+# nice build-speed win, but it's BuildKit-only -- confirmed live that Cloud
+# Build's classic `docker build` step doesn't enable BuildKit by default and
+# fails outright on it: "the --mount option requires BuildKit". Not worth
+# depending on a specific builder config for an image rebuilt infrequently;
+# plain COPY+RUN layering still gets Docker's ordinary layer-cache benefit.
 COPY --chown=corerag:corerag pyproject.toml uv.lock ./
-RUN --mount=type=cache,target=/home/corerag/.cache/uv,uid=1000,gid=1000 \
-    uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project
 
 COPY --chown=corerag:corerag api/ ./api/
 COPY --chown=corerag:corerag core/ ./core/
 COPY --chown=corerag:corerag data/ ./data/
 RUN rm -rf ./data/raw
-RUN --mount=type=cache,target=/home/corerag/.cache/uv,uid=1000,gid=1000 \
-    uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev
 
 # Pre-download and warm the local models (dense/sparse embedders + reranker)
 # at build time, not on first request -- HF Spaces sleeps after 48h idle
