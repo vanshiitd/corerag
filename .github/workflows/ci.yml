@@ -39,8 +39,12 @@ jobs:
       qdrant:
         image: qdrant/qdrant:v1.18.0
         ports: ["6333:6333"]
+      # 8.x, not 7.4: RedisVL's SemanticCache (P4) requires the RediSearch
+      # module, which only 8.x Community Edition bundles natively -- matches
+      # docker-compose.yml's local dev pin (this CI pin was left stale after
+      # that P4 change, and would fail every cache-touching integration test).
       redis:
-        image: redis:7.4-alpine
+        image: redis:8-alpine
         ports: ["6379:6379"]
         options: >-
           --health-cmd "redis-cli ping"

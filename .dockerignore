@@ -1,0 +1,24 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.git/
+.github/
+.claude/
+
+# Real ingestion corpus -- large, and the runtime API never re-parses PDFs; the
+# prod Qdrant Cloud collection is populated once via data.pipeline (P6.2), not
+# baked into the image.
+data/raw/
+
+# Local-dev-only infra config, secrets, docs.
+docker-compose.yml
+.env
+.env.*
+!.env.example
+*.md
+tests/
+eval/golden_set.jsonl

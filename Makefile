@@ -2,7 +2,7 @@
 # Requires: uv (https://docs.astral.sh/uv/). Docker is needed from Checkpoint B onward.
 .DEFAULT_GOAL := help
 
-.PHONY: help install install-eval fmt lint type test test-int check up up-obs up-ingest down logs serve ingest eval eval-testset eval-retrieval eval-ragas eval-ablation eval-cache clean
+.PHONY: help install install-eval fmt lint type test test-int check up up-obs up-ingest down logs serve ingest eval eval-testset eval-retrieval eval-ragas eval-ablation eval-cache docker-build docker-run prewarm ui-dev clean
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -70,6 +70,18 @@ eval-ablation:  ## Contextualization/retrieval ablation table (needs install-eva
 
 eval-cache:  ## Semantic-cache hit-rate/speedup benchmark  [P5.6]
 	uv run python -m eval.latency_bench --cache
+
+docker-build:  ## Build the production API image  [P6.1]
+	docker build -t corerag-api .
+
+docker-run:  ## Run the production image locally on :8000 (needs .env)  [P6.1]
+	docker run --rm -p 8000:8000 -e PORT=8000 --env-file .env corerag-api
+
+prewarm:  ## Pre-warm the semantic cache with representative demo queries  [P6.6]
+	uv run python -m scripts.prewarm_cache
+
+ui-dev:  ## Run the Next.js UI locally with reload  [P6.4]
+	cd ui && npm run dev
 
 clean:  ## Remove tooling caches
 	rm -rf .pytest_cache .mypy_cache .ruff_cache

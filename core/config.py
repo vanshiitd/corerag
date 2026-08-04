@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = True
 
+    # ---- API hardening (P6.3) ------------------------------------------------
+    # "*" is fine for local dev; the hosted demo sets this to the real deployed
+    # Vercel origin via env, not a wildcard, once P6.2 assigns one.
+    cors_allowed_origins: list[str] = Field(default_factory=lambda: ["*"])
+    # Applied to /query only (the expensive, LLM-calling endpoint) -- a public
+    # demo needs abuse protection, not a metered-product-grade limiter.
+    rate_limit_per_minute: int = Field(default=20, ge=1)
+
     # ---- Corpus / arXiv ingestion (locked: cs.DC + cs.AR + cs.LG) -----------
     arxiv_categories: list[str] = Field(default_factory=lambda: ["cs.DC", "cs.AR", "cs.LG"])
     # cs.LG is filtered on *systems-specific* abstract terms -- deliberately NOT

@@ -15,7 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -69,9 +69,14 @@ def run_ragas_eval(settings: Settings, samples: list[GoldenSample]) -> dict[str,
     rows = asyncio.run(_run_graph(settings, samples))
     dataset = EvaluationDataset(samples=rows)
     # features() is real (verified in ragas' own source) but ships no type
-    # annotations, tripping strict mode's disallow-untyped-calls even though the
-    # module itself is otherwise treated as untyped/Any.
-    input_columns: list[str] = dataset.features()  # type: ignore[no-untyped-call]
+    # annotations. Called via getattr, not `dataset.features()` directly: mypy's
+    # disallow-untyped-calls only fires when it can see the call as going through
+    # a *known* untyped function -- and whether it can see that differs depending
+    # on whether the `eval` dependency group is synced (confirmed by running mypy
+    # in both states: a `# type: ignore[no-untyped-call]` or bare cast() is valid
+    # in one state and flagged as unused in the other). getattr()'s return is
+    # untyped Any in both states alike, sidestepping the asymmetry entirely.
+    input_columns = cast("list[str]", getattr(dataset, "features")())  # noqa: B009
 
     # return_executor defaults to False, so this is always an EvaluationResult at
     # runtime; the declared union return type is just an unresolved overload.

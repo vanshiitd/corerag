@@ -75,6 +75,22 @@ curl -s localhost:8000/health | jq
 > **macOS note:** if `docker` isn't on your PATH, add Docker Desktop's CLI:
 > `export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"`.
 
+**Frontend** (`ui/`, Next.js -- talks directly to the API in the browser, see P6.0 in
+`PLAN.md` for why it can't be proxied through a Vercel function):
+
+```bash
+cd ui && npm install
+cp .env.local.example .env.local   # point NEXT_PUBLIC_API_URL at your running API
+npm run dev                        # http://localhost:3000
+```
+
+**Production image** (`Dockerfile`, repo root):
+
+```bash
+docker build -t corerag-api .
+docker run --rm -p 8000:8000 -e PORT=8000 --env-file .env corerag-api
+```
+
 ## Developer tasks
 
 | Command | What it does |
@@ -98,18 +114,24 @@ curl -s localhost:8000/health | jq
 ## Layout
 
 ```text
-api/      FastAPI app, routes, schemas, DI
-core/     config, clients, logging, retrieval, reranker, cache, agents (LangGraph)
+api/      FastAPI app, routes, schemas, DI, CORS + rate limiting
+core/     config, clients, logging, retrieval, reranker, cache, agents (LangGraph), rate limiting
 data/     ingestion pipeline (fetch, parse, chunk, contextualize, index)
 eval/     golden-set generation, RAGAS, retrieval metrics, ablation, latency benchmarks
+scripts/  ops scripts: cache pre-warming, keep-alive
+ui/       Next.js chat frontend (P6.4)
 tests/    pytest (unit + integration)
+Dockerfile   production API image (P6.1)
 ```
 
 ## Status
 
-**P0–P5 complete** — foundations, ingestion (150-paper AI-systems corpus), two-stage
-retrieval, LangGraph agentic orchestration (router → retrieve → grade/reflect → generate),
-a semantic cache, and a real evaluation suite. P6 (hosted live demo) is next — see
+**P0–P5 complete.** P6 (hosted live demo) is in progress: the production Docker image
+(P6.1), API hardening (CORS + rate limiting, P6.3), the Next.js UI (P6.4), and demo
+polish (cache pre-warming + a Qdrant keep-alive, P6.6) are all built and verified live.
+Actually provisioning the cloud services and deploying (P6.2) — and the real
+production-host reranker benchmark that depends on it (P6.5) — need external accounts
+(Qdrant Cloud, Redis Cloud, Google Cloud, Vercel) that haven't been created yet. See
 [`PLAN.md`](PLAN.md) for the full phase tracker and every real finding behind these numbers.
 
 ### Results (real, not placeholders — reproduce with `make eval` / `make eval-ablation` / `make eval-cache`)

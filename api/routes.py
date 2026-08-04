@@ -9,7 +9,7 @@ from typing import Annotated
 
 import redis.asyncio as aioredis
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from langgraph.graph.state import CompiledStateGraph
 from qdrant_client import AsyncQdrantClient
@@ -26,6 +26,7 @@ from core import __version__
 from core.cache import CachedAnswer, check_cache_async, store_in_cache_async
 from core.clients import check_qdrant, check_redis
 from core.config import Settings
+from core.rate_limit import RateLimitExceededError, check_rate_limit
 from core.reranker import rerank_async
 from core.retrieval import ScoredChunk, hybrid_search
 from core.tracing import get_tracing_handler
@@ -164,13 +165,38 @@ async def _stream_query(
     yield _sse("sources", {"citations": [c.model_dump() for c in citations]})
 
 
-@router.post("/query")
+def _client_ip(request: Request) -> str:
+    # Prefer X-Forwarded-For: Cloud Run (and most PaaS hosts) sits behind a
+    # proxy, so request.client.host alone would be the proxy's own address,
+    # not the real caller's -- the same IP for every client, defeating
+    # per-client rate limiting entirely.
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def _enforce_rate_limit(request: Request, redis: RedisDep, settings: SettingsDep) -> None:
+    try:
+        await check_rate_limit(redis, settings, _client_ip(request))
+    except RateLimitExceededError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests -- please wait before trying again.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
+
+@router.post("/query", dependencies=[Depends(_enforce_rate_limit)])
 async def query(body: QueryRequest, graph: GraphDep, settings: SettingsDep) -> StreamingResponse:
     """Agentic query endpoint: streams a grounded, cited answer via SSE.
 
-    Checks the semantic cache first -- a hit skips the graph entirely (no
-    LLM/retrieval calls) and streams the cached answer/citations in the same SSE
-    shapes; a miss runs the full graph, then writes through after the stream.
+    Rate-limited per client IP (settings.rate_limit_per_minute) -- this is a
+    public demo, not a metered product, so the goal is abuse protection, not
+    precise fairness. Checks the semantic cache first -- a hit skips the graph
+    entirely (no LLM/retrieval calls) and streams the cached answer/citations
+    in the same SSE shapes; a miss runs the full graph, then writes through
+    after the stream.
     """
     cached = await check_cache_async(body.query, settings)
     if cached is not None:

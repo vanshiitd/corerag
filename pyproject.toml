@@ -18,6 +18,10 @@ dependencies = [
     "fastembed>=0.4",
     "tiktoken>=0.7",
     "sentence-transformers[onnx]>=3.3",
+    # Direct (not left transitive via sentence-transformers): [tool.uv.sources]'s
+    # per-platform index override below only took effect once torch was pinned
+    # as a real project dependency, not left implicit -- confirmed live.
+    "torch>=2.0",
     "langgraph>=0.2",
     "langchain>=0.3",
     "langchain-core>=0.3",
@@ -44,6 +48,23 @@ eval = [
 # dependencies but does not build/install the project itself.
 [tool.uv]
 package = false
+
+# CPU-only torch: reranker_mode is always CPU (pytorch-cpu/cpu-onnx, see
+# core/config.py) -- never GPU -- but PyPI's default `torch` wheel on Linux
+# bundles the full CUDA toolkit regardless (nvidia-cublas/cudnn/cufft/etc.),
+# confirmed live: it blew a first production Docker build up to 22.9GB.
+# sys_platform=='linux' only (not the inverse on Darwin): this dev machine's
+# macOS torch wheels never bundle CUDA anyway, so it keeps resolving from the
+# default index there -- the pytorch-cpu index only changes the Linux (deploy
+# target) resolution. Matches uv's own documented pattern exactly (verified
+# live via docs.astral.sh/uv/guides/integration/pytorch), not guessed syntax.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.ruff]
 line-length = 100

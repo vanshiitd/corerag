@@ -1,0 +1,29 @@
+name: Keep-alive
+
+# Qdrant Cloud's free tier suspends a cluster after 1 week of inactivity
+# (PLAN.md P6.0) -- a real risk for a portfolio demo with sporadic traffic.
+# Pinging the deployed /health endpoint (which itself pings both Qdrant and
+# Redis, core/clients.py's check_qdrant/check_redis) every 3 days keeps both
+# free-tier services counted as "active" with a comfortable safety margin,
+# for the cost of a few seconds of free GitHub Actions minutes.
+#
+# Requires a repository variable DEMO_URL (Settings -> Secrets and variables
+# -> Actions -> Variables) pointing at the deployed HF Spaces URL -- set once
+# P6.2 provisions it. Runs a no-op-safe skip until then.
+
+on:
+  schedule:
+    - cron: "0 6 */3 * *" # every 3 days at 06:00 UTC
+  workflow_dispatch: {} # allow a manual trigger too
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          if [ -z "${{ vars.DEMO_URL }}" ]; then
+            echo "DEMO_URL not set yet -- skipping (see P6.2)."
+            exit 0
+          fi
+          curl -sf --retry 3 --retry-delay 5 "${{ vars.DEMO_URL }}/health"
