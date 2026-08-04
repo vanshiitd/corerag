@@ -55,6 +55,9 @@ flowchart TD
 
 ## Quick start
 
+This is the recommended, fastest way to run CoreRAG right now (see Status above) —
+backend + UI both running locally, real query latency in the 12–24s range.
+
 **Prerequisites:** [uv](https://docs.astral.sh/uv/) and Docker Desktop.
 
 ```bash
@@ -126,13 +129,16 @@ Dockerfile   production API image (P6.1)
 
 ## Status
 
-**P0–P5 complete.** P6 (hosted live demo) is in progress: the production Docker image
-(P6.1), API hardening (CORS + rate limiting, P6.3), the Next.js UI (P6.4), and demo
-polish (cache pre-warming + a Qdrant keep-alive, P6.6) are all built and verified live.
-Actually provisioning the cloud services and deploying (P6.2) — and the real
-production-host reranker benchmark that depends on it (P6.5) — need external accounts
-(Qdrant Cloud, Redis Cloud, Google Cloud, Vercel) that haven't been created yet. See
-[`PLAN.md`](PLAN.md) for the full phase tracker and every real finding behind these numbers.
+**P0–P6 complete.** Every piece (production Docker image, API hardening, the Next.js
+UI, cache pre-warming, a Qdrant keep-alive) is built and verified live, and the backend
+was successfully deployed to Google Cloud Run against real Qdrant Cloud + Redis Cloud
+instances — correct, but **slow**: real query latency there landed at 100–240s (P6.5),
+a ~15–25× slowdown vs. this project's Apple Silicon dev machine that two rounds of
+real investigation (mode switching, thread-count tuning) couldn't close. **Running
+locally only for now** as the practical choice — real end-to-end latency here is
+12–24s, matching every benchmark throughout the project (see Quick start below). The
+Cloud Run deployment still exists and works if you want to see it; see [`PLAN.md`](PLAN.md)
+P6.5 for the full investigation and real numbers behind this call.
 
 ### Results (real, not placeholders — reproduce with `make eval` / `make eval-ablation` / `make eval-cache`)
 
