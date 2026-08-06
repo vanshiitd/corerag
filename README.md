@@ -1,14 +1,44 @@
 # CoreRAG
 
-A low-latency, hallucination-resistant **agentic RAG** microservice over AI-Systems
-literature (arXiv). It pairs **two-stage retrieval** (hybrid dense + BM25 recall → cross-encoder
-precision) with a **LangGraph reflection loop** and a **semantic cache**, served over
-streaming FastAPI with per-answer citations.
+[![CI](https://github.com/vanshiitd/corerag/actions/workflows/ci.yml/badge.svg)](https://github.com/vanshiitd/corerag/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](pyproject.toml)
 
-> Portfolio / research engineering piece. Full spec in [`PRD.md`](PRD.md); the build plan and
-> phase tracker live in [`PLAN.md`](PLAN.md).
+A low-latency, hallucination-resistant **agentic RAG** system over AI-systems literature
+(arXiv). It pairs **two-stage retrieval** (hybrid dense + BM25 recall → cross-encoder
+precision) with a **LangGraph reflection loop** and a **semantic cache**, served over a
+streaming FastAPI backend with per-answer citations and a Next.js chat UI.
 
 ![CoreRAG demo: a real, cited answer streamed from the local stack](docs/img/demo.png)
+
+## Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [Stack](#stack)
+- [Quick start](#quick-start)
+- [Developer tasks](#developer-tasks)
+- [Layout](#layout)
+- [Deployment](#deployment)
+- [Results](#results)
+- [Documentation](#documentation)
+- [License](#license)
+
+## Features
+
+- **Two-stage retrieval** — hybrid dense + BM25 recall (Qdrant RRF fusion), narrowed by
+  a local cross-encoder reranker.
+- **Agentic reflection loop** (LangGraph) — a router picks simple vs. multi-hop, a
+  grader checks relevance and rewrites the query on a miss, bounded by a retry cap.
+- **Grounded, cited generation** — every claim is tied to a numbered source passage;
+  the model is instructed to abstain rather than fill gaps with unsupported claims.
+- **Semantic cache** — a Redis-backed embedding cache serves repeat/near-duplicate
+  queries in milliseconds instead of re-running the full graph.
+- **Streaming API** — FastAPI + SSE: a token stream, a routing/reflection trace, and
+  citations, delivered as the graph completes each stage.
+- **Real, reproducible evaluation** — retrieval metrics (hit@k/MRR/nDCG), RAGAS
+  answer-quality scoring, and a contextualization/retrieval ablation, all against a
+  181-question golden set. See [Results](#results).
 
 ## Architecture
 
@@ -57,8 +87,9 @@ flowchart TD
 
 ## Quick start
 
-This is the recommended, fastest way to run CoreRAG right now (see Status above) —
-backend + UI both running locally, real query latency in the 12–24s range.
+This is the recommended, fastest way to run CoreRAG right now (see
+[Deployment](#deployment) for why) — backend + UI both running locally, real query
+latency in the 12–24s range.
 
 **Prerequisites:** [uv](https://docs.astral.sh/uv/) and Docker Desktop.
 
@@ -80,7 +111,7 @@ curl -s localhost:8000/health | jq
 > **macOS note:** if `docker` isn't on your PATH, add Docker Desktop's CLI:
 > `export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"`.
 
-**Frontend** (`ui/`, Next.js -- talks directly to the API in the browser, see P6.0 in
+**Frontend** (`ui/`, Next.js — talks directly to the API in the browser, see P6.0 in
 `PLAN.md` for why it can't be proxied through a Vercel function):
 
 ```bash
@@ -129,20 +160,25 @@ tests/    pytest (unit + integration)
 Dockerfile   production API image (P6.1)
 ```
 
-## Status
+## Deployment
 
-**P0–P6 complete.** Every piece (production Docker image, API hardening, the Next.js
-UI, cache pre-warming, a Qdrant keep-alive) is built and verified live, and the backend
-was successfully deployed to Google Cloud Run against real Qdrant Cloud + Redis Cloud
-instances — correct, but **slow**: real query latency there landed at 100–240s (P6.5),
-a ~15–25× slowdown vs. this project's Apple Silicon dev machine that two rounds of
-real investigation (mode switching, thread-count tuning) couldn't close. **Running
-locally only for now** as the practical choice — real end-to-end latency here is
-12–24s, matching every benchmark throughout the project (see Quick start below). The
-Cloud Run deployment still exists and works if you want to see it; see [`PLAN.md`](PLAN.md)
-P6.5 for the full investigation and real numbers behind this call.
+**P0–P6 complete.** Every piece — production Docker image, API hardening, the Next.js
+UI, cache pre-warming, a Qdrant keep-alive — is built and verified live.
 
-### Results (real, not placeholders — reproduce with `make eval` / `make eval-ablation` / `make eval-cache`)
+**Local (recommended).** Backend + UI both run end-to-end locally at 12–24s real query
+latency, matching every benchmark in this project. See [Quick start](#quick-start).
+
+**Cloud Run.** The backend is also deployed to Google Cloud Run against real Qdrant
+Cloud + Redis Cloud instances — correct, but **slow**: real query latency there lands
+at 100–240s, a ~15–25× slowdown vs. this project's Apple Silicon dev machine that two
+rounds of real investigation (mode switching, thread-count tuning) couldn't close. Kept
+running as a reference deployment; local is the practical way to actually use it. Full
+investigation and numbers in [`PLAN.md`](PLAN.md) P6.5.
+
+## Results
+
+Real, reproducible numbers — not placeholders. Reproduce with `make eval`,
+`make eval-ablation`, or `make eval-cache`.
 
 **Retrieval quality** (hit@30 / MRR / nDCG@30, hybrid + rerank, full 181-question golden set):
 
@@ -187,6 +223,12 @@ see `PLAN.md` P5.4 for the full trace back to RAGAS's own source.
 **Semantic cache**: a repeat query returns in **~28ms** vs. **~12.8s** for a fresh
 graph run — a **~450× speedup**, with zero LLM/retrieval calls on the hit path
 (verified via absent trace lines, not just wall-clock feel).
+
+## Documentation
+
+- [`PRD.md`](PRD.md) — full product/technical spec
+- [`PLAN.md`](PLAN.md) — phase-by-phase build log, including every real bug found and
+  fixed along the way
 
 ## License
 
