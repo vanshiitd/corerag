@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { parseSSE } from "./lib/sse";
 import type { ChatMessage, Citation, TraceInfo } from "./lib/types";
 
@@ -26,13 +26,28 @@ function updateLast(prev: ChatMessage[], patch: Partial<ChatMessage>): ChatMessa
   return next;
 }
 
-function CitationCard({ citation, index }: { citation: Citation; index: number }) {
+function CitationCard({
+  citation,
+  index,
+  highlighted,
+  cardRef,
+}: {
+  citation: Citation;
+  index: number;
+  highlighted: boolean;
+  cardRef: (el: HTMLAnchorElement | null) => void;
+}) {
   return (
     <a
+      ref={cardRef}
       href={citation.abs_url}
       target="_blank"
       rel="noreferrer"
-      className="block rounded-lg border border-zinc-200 px-3 py-2 text-sm transition hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600"
+      className={`block rounded-lg border px-3 py-2 text-sm transition ${
+        highlighted
+          ? "border-zinc-400 bg-zinc-50 dark:border-zinc-500 dark:bg-zinc-900"
+          : "border-zinc-200 hover:border-zinc-400 dark:border-zinc-800 dark:hover:border-zinc-600"
+      }`}
     >
       <span className="font-mono text-xs text-zinc-500 dark:text-zinc-400">[{index + 1}]</span>{" "}
       <span className="font-medium">{citation.title}</span>
@@ -41,6 +56,17 @@ function CitationCard({ citation, index }: { citation: Citation; index: number }
       )}
     </a>
   );
+}
+
+/** Splits answer text on "[n]" citation markers. Each piece is either plain text
+ * or a 0-based citation index -- pure and ref-free so it's safe to call during
+ * render; the caller decides how to turn a citation-index piece into a click
+ * target (needs a ref to the matching card, which must stay out of this helper). */
+function splitAnswerText(content: string): (string | number)[] {
+  return content.split(/(\[\d+\])/g).map((part) => {
+    const match = /^\[(\d+)\]$/.exec(part);
+    return match ? Number(match[1]) - 1 : part;
+  });
 }
 
 function TracePanel({ trace }: { trace: TraceInfo }) {
@@ -70,6 +96,15 @@ function TracePanel({ trace }: { trace: TraceInfo }) {
 
 function Message({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
+  const citationRefs = useRef<Record<number, HTMLAnchorElement | null>>({});
+  const [highlighted, setHighlighted] = useState<number | null>(null);
+
+  const jumpToCitation = useCallback((index: number) => {
+    citationRefs.current[index]?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlighted(index);
+    window.setTimeout(() => setHighlighted((h) => (h === index ? null : h)), 1500);
+  }, []);
+
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div className={`max-w-2xl ${isUser ? "w-fit" : "w-full"}`}>
@@ -80,7 +115,27 @@ function Message({ message }: { message: ChatMessage }) {
               : "bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
           }`}
         >
-          {message.content}
+          {isUser
+            ? message.content
+            : splitAnswerText(message.content).map((part, i) => {
+                if (
+                  typeof part === "number" &&
+                  part >= 0 &&
+                  part < (message.citations?.length ?? 0)
+                ) {
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={() => jumpToCitation(part)}
+                      className="border-0 bg-transparent p-0 font-mono text-current underline decoration-dotted underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"
+                    >
+                      [{part + 1}]
+                    </button>
+                  );
+                }
+                return <span key={i}>{typeof part === "number" ? `[${part + 1}]` : part}</span>;
+              })}
           {message.pending && !message.content && (
             <span className="inline-block animate-pulse text-zinc-400">thinking&hellip;</span>
           )}
@@ -89,7 +144,15 @@ function Message({ message }: { message: ChatMessage }) {
         {message.citations && message.citations.length > 0 && (
           <div className="mt-2 space-y-1.5">
             {message.citations.map((c, i) => (
-              <CitationCard key={c.chunk_id} citation={c} index={i} />
+              <CitationCard
+                key={c.chunk_id}
+                citation={c}
+                index={i}
+                highlighted={highlighted === i}
+                cardRef={(el) => {
+                  citationRefs.current[i] = el;
+                }}
+              />
             ))}
           </div>
         )}
