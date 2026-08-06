@@ -123,9 +123,21 @@ def _chunk_words(text: str) -> list[str]:
 
 
 async def _stream_cached(cached: CachedAnswer) -> AsyncIterator[str]:
-    """Replay a cache hit as the same token/sources SSE shapes as a real run."""
+    """Replay a cache hit as the same token/sources SSE shapes as a real run,
+    plus a trace event so the UI doesn't need to special-case a missing one."""
+    t0 = time.perf_counter()
     for piece in _chunk_words(cached.answer):
         yield _sse("token", {"content": piece})
+    yield _sse(
+        "trace",
+        {
+            "cached": True,
+            "route": None,
+            "retries": None,
+            "low_confidence": None,
+            "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
+        },
+    )
     yield _sse("sources", {"citations": [c.model_dump() for c in cached.citations]})
 
 
@@ -134,15 +146,20 @@ async def _stream_query(
 ) -> AsyncIterator[str]:
     """Yield SSE events: a 'token' event per generated token (from the *generate*
     node only -- router/grader also stream their own raw structured-output JSON,
-    which must not leak into the user-facing answer), then one final 'sources'
-    event once the graph completes. Writes through to the cache before that final
-    yield (not after) -- guaranteed to run as long as the client stayed connected
-    through the token stream, unlike code placed after the last yield, which a
-    client disconnecting right at the end could skip entirely."""
+    which must not leak into the user-facing answer), a 'trace' event summarizing
+    the routing/reflection path taken, then one final 'sources' event once the
+    graph completes. Writes through to the cache before that final yield (not
+    after) -- guaranteed to run as long as the client stayed connected through
+    the token stream, unlike code placed after the last yield, which a client
+    disconnecting right at the end could skip entirely."""
     handler = get_tracing_handler(settings)
     callbacks = [handler] if handler else []
     citations: list[ScoredChunk] = []
     answer = ""
+    route: str | None = None
+    retries = 0
+    low_confidence = False
+    t0 = time.perf_counter()
 
     async for event in graph.astream_events(
         {"query": query, "original_query": query, "retries": 0},
@@ -158,10 +175,39 @@ async def _stream_query(
             output = event["data"]["output"]
             citations = output.get("citations", [])
             answer = output.get("answer", "")
+        elif event["event"] == "on_chain_end" and node == "router":
+            # A node tagged "router" fires on_chain_end twice: once for the
+            # inner with_structured_output call (a raw RouteDecision object,
+            # no .get()) and once for router_node's own dict return -- confirmed
+            # live (AttributeError: 'RouteDecision' object has no attribute
+            # 'get'). Only the dict is the one we want.
+            output = event["data"]["output"]
+            if isinstance(output, dict):
+                route = output.get("route")
+        elif event["event"] == "on_chain_end" and node == "grade":
+            # Same inner/outer duplication as router (grade also uses
+            # with_structured_output internally) -- guard identically.
+            output = event["data"]["output"]
+            if isinstance(output, dict):
+                # retries is absent from grade's "proceed" return (only present
+                # on a retry) -- .get() with the running total keeps the last
+                # real count instead of resetting to 0 on the final grade call.
+                retries = output.get("retries", retries)
+                low_confidence = output.get("low_confidence", low_confidence)
 
     if answer:
         await store_in_cache_async(query, answer, citations, settings)
 
+    yield _sse(
+        "trace",
+        {
+            "cached": False,
+            "route": route,
+            "retries": retries,
+            "low_confidence": low_confidence,
+            "elapsed_ms": round((time.perf_counter() - t0) * 1000, 1),
+        },
+    )
     yield _sse("sources", {"citations": [c.model_dump() for c in citations]})
 
 

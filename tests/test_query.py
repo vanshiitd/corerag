@@ -33,30 +33,6 @@ def _parse_sse(text: str) -> list[tuple[str, dict[str, object]]]:
     return events
 
 
-@pytest.mark.integration
-def test_query_streams_tokens_then_sources() -> None:
-    with TestClient(app) as client:
-        resp = client.post("/query", json={"query": "what is speculative decoding?"})
-    assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("text/event-stream")
-
-    events = _parse_sse(resp.text)
-    assert events, "expected at least one SSE event"
-
-    token_events = [e for e in events if e[0] == "token"]
-    source_events = [e for e in events if e[0] == "sources"]
-
-    assert len(token_events) > 0
-    answer = "".join(str(d["content"]) for _, d in token_events)
-    assert len(answer) > 0
-
-    assert len(source_events) == 1
-    citations = source_events[0][1]["citations"]
-    assert isinstance(citations, list)
-    assert len(citations) > 0
-    assert all("chunk_id" in c and "text" in c for c in citations)
-
-
 @pytest.fixture
 def isolated_cache_settings() -> Iterator[None]:
     """Override the /query endpoint's settings dependency to use a dedicated,
@@ -73,6 +49,38 @@ def isolated_cache_settings() -> Iterator[None]:
         with contextlib.suppress(Exception):
             cache.clear()
         del app.dependency_overrides[get_settings_dep]
+
+
+@pytest.mark.integration
+def test_query_streams_tokens_then_sources(isolated_cache_settings: None) -> None:
+    with TestClient(app) as client:
+        resp = client.post("/query", json={"query": "what is speculative decoding?"})
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/event-stream")
+
+    events = _parse_sse(resp.text)
+    assert events, "expected at least one SSE event"
+
+    token_events = [e for e in events if e[0] == "token"]
+    source_events = [e for e in events if e[0] == "sources"]
+    trace_events = [e for e in events if e[0] == "trace"]
+
+    assert len(token_events) > 0
+    answer = "".join(str(d["content"]) for _, d in token_events)
+    assert len(answer) > 0
+
+    assert len(source_events) == 1
+    citations = source_events[0][1]["citations"]
+    assert isinstance(citations, list)
+    assert len(citations) > 0
+    assert all("chunk_id" in c and "text" in c for c in citations)
+
+    assert len(trace_events) == 1
+    trace = trace_events[0][1]
+    assert trace["cached"] is False
+    assert trace["route"] in ("simple", "multi_hop")
+    assert isinstance(trace["retries"], int)
+    assert isinstance(trace["elapsed_ms"], (int, float))
 
 
 @pytest.mark.integration
@@ -104,11 +112,14 @@ def test_query_second_identical_call_hits_cache_and_is_fast(
     second_events = _parse_sse(second.text)
     second_answer = "".join(str(d["content"]) for e, d in second_events if e == "token")
     second_citations = next(d for e, d in second_events if e == "sources")["citations"]
+    second_trace = next(d for e, d in second_events if e == "trace")
 
     assert second_answer.strip() == first_answer.strip()
     assert second_citations == first_citations
     assert second_elapsed < first_elapsed / 10  # at least an order of magnitude faster
     assert second_elapsed < 1.0  # sub-second, well inside the sub-100ms goal in practice
+    assert second_trace["cached"] is True
+    assert second_trace["route"] is None
 
 
 @pytest.mark.integration
