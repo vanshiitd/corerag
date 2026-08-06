@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
 import { parseSSE } from "./lib/sse";
 import type { ChatMessage, Citation, TraceInfo } from "./lib/types";
 
@@ -19,10 +21,10 @@ const SAMPLE_QUERIES = [
   "what are the tradeoffs of tensor parallelism?",
 ];
 
-function updateLast(prev: ChatMessage[], patch: Partial<ChatMessage>): ChatMessage[] {
+function updateAt(prev: ChatMessage[], index: number, patch: Partial<ChatMessage>): ChatMessage[] {
   const next = [...prev];
-  const last = next[next.length - 1];
-  if (last) next[next.length - 1] = { ...last, ...patch };
+  const target = next[index];
+  if (target) next[index] = { ...target, ...patch };
   return next;
 }
 
@@ -58,16 +60,51 @@ function CitationCard({
   );
 }
 
-/** Splits answer text on "[n]" citation markers. Each piece is either plain text
- * or a 0-based citation index -- pure and ref-free so it's safe to call during
- * render; the caller decides how to turn a citation-index piece into a click
- * target (needs a ref to the matching card, which must stay out of this helper). */
-function splitAnswerText(content: string): (string | number)[] {
-  return content.split(/(\[\d+\])/g).map((part) => {
-    const match = /^\[(\d+)\]$/.exec(part);
-    return match ? Number(match[1]) - 1 : part;
+/** Rewrites "[n]" citation markers into markdown links to a "#cite-{index}"
+ * fragment so react-markdown parses them as real link nodes we can intercept --
+ * markers whose n falls outside the actual citation count (e.g. mid-stream,
+ * before the "sources" event has arrived) are left as plain "[n]" text. Pure
+ * and ref-free, safe to call during render. */
+function citationMarkdownSource(content: string, citationCount: number): string {
+  return content.replace(/\[(\d+)\]/g, (marker, numStr: string) => {
+    const n = Number(numStr);
+    return n >= 1 && n <= citationCount ? `[${marker}](#cite-${n - 1})` : marker;
   });
 }
+
+const MARKDOWN_COMPONENTS: Components = {
+  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+  ul: ({ children }) => <ul className="mb-2 list-disc pl-5 last:mb-0">{children}</ul>,
+  ol: ({ children }) => <ol className="mb-2 list-decimal pl-5 last:mb-0">{children}</ol>,
+  li: ({ children }) => <li className="mb-0.5">{children}</li>,
+  strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+  code: ({ children }) => (
+    <code className="rounded bg-zinc-200 px-1 py-0.5 text-xs dark:bg-zinc-800">{children}</code>
+  ),
+  // Citation markers become real <a href="#cite-N"> nodes (via
+  // citationMarkdownSource); clicks are handled by delegation on the wrapping
+  // div (see Message's handleAnswerClick) rather than a closure here, since
+  // that closure would need to read a ref and this component object is passed
+  // into ReactMarkdown during render -- a pattern eslint's react-hooks/refs
+  // rule flags as unsafe (can't statically prove the ref isn't read synchronously).
+  a: ({ href, children }) => {
+    const isCite = href?.startsWith("#cite-");
+    return (
+      <a
+        href={href}
+        target={isCite ? undefined : "_blank"}
+        rel={isCite ? undefined : "noreferrer"}
+        className={
+          isCite
+            ? "border-0 bg-transparent p-0 font-mono text-current underline decoration-dotted underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"
+            : "underline decoration-dotted underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"
+        }
+      >
+        {children}
+      </a>
+    );
+  },
+};
 
 function TracePanel({ trace }: { trace: TraceInfo }) {
   const badges: string[] = [];
@@ -94,7 +131,7 @@ function TracePanel({ trace }: { trace: TraceInfo }) {
   );
 }
 
-function Message({ message }: { message: ChatMessage }) {
+function Message({ message, onRetry }: { message: ChatMessage; onRetry: () => void }) {
   const isUser = message.role === "user";
   const citationRefs = useRef<Record<number, HTMLAnchorElement | null>>({});
   const [highlighted, setHighlighted] = useState<number | null>(null);
@@ -104,6 +141,18 @@ function Message({ message }: { message: ChatMessage }) {
     setHighlighted(index);
     window.setTimeout(() => setHighlighted((h) => (h === index ? null : h)), 1500);
   }, []);
+
+  // Event delegation, not a per-link onClick, so MARKDOWN_COMPONENTS' `a`
+  // override can stay a plain, ref-free component (see the comment there).
+  function handleAnswerClick(e: React.MouseEvent<HTMLDivElement>) {
+    const link = (e.target as HTMLElement).closest("a[href^='#cite-']");
+    if (!(link instanceof HTMLAnchorElement)) return;
+    const match = /^#cite-(\d+)$/.exec(link.getAttribute("href") ?? "");
+    if (match) {
+      e.preventDefault();
+      jumpToCitation(Number(match[1]));
+    }
+  }
 
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
@@ -115,31 +164,30 @@ function Message({ message }: { message: ChatMessage }) {
               : "bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-100"
           }`}
         >
-          {isUser
-            ? message.content
-            : splitAnswerText(message.content).map((part, i) => {
-                if (
-                  typeof part === "number" &&
-                  part >= 0 &&
-                  part < (message.citations?.length ?? 0)
-                ) {
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      onClick={() => jumpToCitation(part)}
-                      className="border-0 bg-transparent p-0 font-mono text-current underline decoration-dotted underline-offset-2 hover:text-zinc-900 dark:hover:text-zinc-100"
-                    >
-                      [{part + 1}]
-                    </button>
-                  );
-                }
-                return <span key={i}>{typeof part === "number" ? `[${part + 1}]` : part}</span>;
-              })}
+          {isUser ? (
+            message.content
+          ) : (
+            <div onClick={handleAnswerClick}>
+              <ReactMarkdown components={MARKDOWN_COMPONENTS}>
+                {citationMarkdownSource(message.content, message.citations?.length ?? 0)}
+              </ReactMarkdown>
+            </div>
+          )}
           {message.pending && !message.content && (
             <span className="inline-block animate-pulse text-zinc-400">thinking&hellip;</span>
           )}
-          {message.error && <span className="text-red-500">{message.error}</span>}
+          {message.error && (
+            <div className="text-red-500">
+              {message.error}{" "}
+              <button
+                type="button"
+                onClick={onRetry}
+                className="underline decoration-dotted underline-offset-2 hover:text-red-600"
+              >
+                Retry
+              </button>
+            </div>
+          )}
         </div>
         {message.citations && message.citations.length > 0 && (
           <div className="mt-2 space-y-1.5">
@@ -175,15 +223,7 @@ export default function Home() {
   const [isStreaming, setIsStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  async function runQuery(query: string) {
-    if (!query || isStreaming) return;
-
-    setInput("");
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: query },
-      { role: "assistant", content: "", pending: true },
-    ]);
+  async function streamInto(query: string, index: number) {
     setIsStreaming(true);
     const start = performance.now();
 
@@ -200,7 +240,7 @@ export default function Home() {
           res.status === 429
             ? `Rate limited -- try again in ${retryAfter ?? "a bit"}s.`
             : `Request failed (${res.status}).`;
-        setMessages((prev) => updateLast(prev, { pending: false, error: message }));
+        setMessages((prev) => updateAt(prev, index, { pending: false, error: message }));
         return;
       }
 
@@ -210,7 +250,7 @@ export default function Home() {
       for await (const evt of parseSSE(res)) {
         if (evt.event === "token") {
           content += (evt.data as { content: string }).content;
-          setMessages((prev) => updateLast(prev, { content, pending: true }));
+          setMessages((prev) => updateAt(prev, index, { content, pending: true }));
         } else if (evt.event === "sources") {
           citations = (evt.data as { citations: Citation[] }).citations;
         } else if (evt.event === "trace") {
@@ -221,11 +261,11 @@ export default function Home() {
 
       const latencyMs = Math.round(performance.now() - start);
       setMessages((prev) =>
-        updateLast(prev, { content, citations, trace, latencyMs, pending: false }),
+        updateAt(prev, index, { content, citations, trace, latencyMs, pending: false }),
       );
     } catch (err) {
       setMessages((prev) =>
-        updateLast(prev, {
+        updateAt(prev, index, {
           pending: false,
           error: err instanceof Error ? err.message : "Request failed.",
         }),
@@ -234,6 +274,35 @@ export default function Home() {
       setIsStreaming(false);
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
+  }
+
+  async function runQuery(query: string) {
+    if (!query || isStreaming) return;
+    setInput("");
+    const index = messages.length + 1; // user msg lands at messages.length, assistant right after
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", content: query },
+      { role: "assistant", content: "", pending: true },
+    ]);
+    await streamInto(query, index);
+  }
+
+  async function retryMessage(index: number) {
+    if (isStreaming) return;
+    const query = messages[index - 1]?.content;
+    if (!query) return;
+    setMessages((prev) =>
+      updateAt(prev, index, {
+        content: "",
+        citations: undefined,
+        trace: undefined,
+        latencyMs: undefined,
+        error: undefined,
+        pending: true,
+      }),
+    );
+    await streamInto(query, index);
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -273,7 +342,7 @@ export default function Home() {
           </div>
         )}
         {messages.map((m, i) => (
-          <Message key={i} message={m} />
+          <Message key={i} message={m} onRetry={() => void retryMessage(i)} />
         ))}
         <div ref={bottomRef} />
       </main>
