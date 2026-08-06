@@ -8,6 +8,8 @@ streaming FastAPI with per-answer citations.
 > Portfolio / research engineering piece. Full spec in [`PRD.md`](PRD.md); the build plan and
 > phase tracker live in [`PLAN.md`](PLAN.md).
 
+![CoreRAG demo: a real, cited answer streamed from the local stack](docs/img/demo.png)
+
 ## Architecture
 
 **Ingestion (offline):**
@@ -180,3 +182,7 @@ see `PLAN.md` P5.4 for the full trace back to RAGAS's own source.
 **Semantic cache**: a repeat query returns in **~28ms** vs. **~12.8s** for a fresh
 graph run — a **~450× speedup**, with zero LLM/retrieval calls on the hit path
 (verified via absent trace lines, not just wall-clock feel).
+
+## License
+
+[MIT](LICENSE)
