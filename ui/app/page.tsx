@@ -9,6 +9,16 @@ import type { ChatMessage, Citation } from "./lib/types";
 // (non-cached) /query answer legitimately takes 12-24s (PLAN.md P3.8).
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// Real questions this corpus answers well, verified throughout development --
+// same list as scripts/prewarm_cache.py's DEMO_QUERIES, kept in sync manually
+// (small, stable list; not worth importing across the Python/TS boundary).
+const SAMPLE_QUERIES = [
+  "what is speculative decoding?",
+  "how does continuous batching work in LLM serving?",
+  "what is a KV cache and how does it affect memory usage in transformers?",
+  "what are the tradeoffs of tensor parallelism?",
+];
+
 function updateLast(prev: ChatMessage[], patch: Partial<ChatMessage>): ChatMessage[] {
   const next = [...prev];
   const last = next[next.length - 1];
@@ -76,9 +86,7 @@ export default function Home() {
   const [isStreaming, setIsStreaming] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    const query = input.trim();
+  async function runQuery(query: string) {
     if (!query || isStreaming) return;
 
     setInput("");
@@ -134,6 +142,11 @@ export default function Home() {
     }
   }
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    void runQuery(input.trim());
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-white dark:bg-black">
       <header className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
@@ -146,10 +159,24 @@ export default function Home() {
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 overflow-y-auto px-6 py-6">
         {messages.length === 0 && (
-          <p className="text-sm text-zinc-400 dark:text-zinc-500">
-            Ask something about LLM inference serving, KV cache compression, speculative
-            decoding, distributed training, or hardware accelerators.
-          </p>
+          <div className="space-y-3">
+            <p className="text-sm text-zinc-400 dark:text-zinc-500">
+              Ask something about LLM inference serving, KV cache compression, speculative
+              decoding, distributed training, or hardware accelerators -- or try one of these:
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {SAMPLE_QUERIES.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => runQuery(q)}
+                  className="rounded-full border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 transition hover:border-zinc-500 hover:text-zinc-900 dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-500 dark:hover:text-zinc-100"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
         {messages.map((m, i) => (
           <Message key={i} message={m} />
