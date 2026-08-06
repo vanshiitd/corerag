@@ -132,13 +132,13 @@ def run_ragas_eval(
     checkpoint: Path = _DEFAULT_CHECKPOINT,
     *,
     score_partial: bool = False,
-) -> dict[str, float] | None:
+) -> tuple[dict[str, float], int] | None:
     """Score real graph runs over the golden set with RAGAS's core RAG metrics.
 
-    Returns None (does not score) if the checkpoint isn't yet complete for this
-    sample set and `score_partial` wasn't requested -- scoring is OpenAI-judged,
-    real-money work, not worth spending on a set that'll grow once the Groq quota
-    that interrupted graph-running resets."""
+    Returns (scores, n_scored), or None (does not score) if the checkpoint isn't
+    yet complete for this sample set and `score_partial` wasn't requested --
+    scoring is OpenAI-judged, real-money work, not worth spending on a set that'll
+    grow once the Groq quota that interrupted graph-running resets."""
     from ragas import EvaluationDataset, evaluate
     from ragas.dataset_schema import EvaluationResult  # not re-exported from ragas top-level
     from ragas.metrics import AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
@@ -179,7 +179,8 @@ def run_ragas_eval(
     # __repr__ happens to use internally -- per-metric column mean, NaN-safe.
     df = result.to_pandas()
     metric_columns = [c for c in df.columns if c not in input_columns]
-    return {col: round(float(df[col].mean()), 4) for col in metric_columns}
+    scores = {col: round(float(df[col].mean()), 4) for col in metric_columns}
+    return scores, len(rows)
 
 
 def _main() -> None:
@@ -201,14 +202,15 @@ def _main() -> None:
         samples = samples[: args.limit]
     log.info("ragas_eval.loaded", n=len(samples), golden=str(args.golden))
 
-    scores = run_ragas_eval(settings, samples, args.checkpoint, score_partial=args.score_partial)
-    if scores is None:
+    result = run_ragas_eval(settings, samples, args.checkpoint, score_partial=args.score_partial)
+    if result is None:
         log.warning(
             "ragas_eval.not_scored",
             hint="re-run the same command once the Groq daily quota resets to continue",
         )
         return
-    log.info("ragas_eval.result", n=len(samples), **scores)
+    scores, n_scored = result
+    log.info("ragas_eval.result", n=n_scored, total=len(samples), **scores)
 
 
 if __name__ == "__main__":

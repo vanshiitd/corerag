@@ -152,14 +152,19 @@ P6.5 for the full investigation and real numbers behind this call.
 | MRR | 0.853 |
 | nDCG@30 | 0.882 |
 
-**Answer quality** (RAGAS, judge = gpt-4o-mini, n=30 real graph runs):
+**Answer quality** (RAGAS, judge = gpt-4o-mini, n=55 real graph runs — 55/181 of the
+golden set, checkpointed run stopped by Groq's shared daily generation-token quota
+mid-eval; see `PLAN.md` P5.4 for the resumable design and how to extend this):
 
 | Metric | Score |
 | :-- | --: |
-| Faithfulness | 0.811 |
-| Context precision | 0.884 |
-| Context recall | 0.925 |
-| Answer relevancy | 0.032† |
+| Faithfulness | 0.797 |
+| Context precision | 0.928 |
+| Context recall | 0.932 |
+| Answer relevancy | 0.046† |
+
+Consistent with the earlier n=30 subset (0.811 / 0.884 / 0.925 / 0.032) — nearly double
+the sample, same real story: faithful, well-grounded answers.
 
 † RAGAS's `AnswerRelevancy` forces a score of 0 whenever it classifies an answer as
 "noncommittal" — and this system's generator deliberately hedges ("the sources don't
