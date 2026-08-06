@@ -1,4 +1,4 @@
-"""RAGAS answer-quality evaluation (P5.4): faithfulness, answer relevancy, context
+"""RAGAS answer-quality evaluation: faithfulness, answer relevancy, context
 precision/recall over real graph runs against the golden set.
 
 Judge = core.llm.get_agent_model (gpt-4o-mini, already used for router/grader) via
@@ -11,8 +11,8 @@ Run standalone:
 
 Generation (the graph's "generate" node) runs on Groq, whose free tier caps
 llama-3.3-70b-versatile at 100,000 tokens/day *per organization* -- already
-confirmed exhausted mid-eval once before (PLAN.md P5.6). A full 181-question
-run can plausibly need more than a day's quota, so each completed question's
+confirmed exhausted mid-eval once before. A full 181-question run can
+plausibly need more than a day's quota, so each completed question's
 graph output is checkpointed to `--checkpoint` (append-only JSONL, flushed per
 row) and skipped on a later run -- interrupting or hitting the quota loses no
 already-paid-for work. Scoring (OpenAI-judged, real $ cost) only runs once

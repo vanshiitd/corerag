@@ -3,8 +3,8 @@
 Wraps RedisVL's SemanticCache with our own local embedder (CustomVectorizer over
 data.embeddings.embed_dense) -- no new paid provider, consistent with the
 hybrid-providers architecture. Threshold (settings.cache_similarity_threshold,
-default 0.95) empirically validated during P4 planning against real
-opposite-intent query pairs -- see PLAN.md.
+default 0.95) empirically validated against real opposite-intent query pairs --
+see PRD.md section 3.
 """
 
 from __future__ import annotations

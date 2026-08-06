@@ -111,8 +111,9 @@ curl -s localhost:8000/health | jq
 > **macOS note:** if `docker` isn't on your PATH, add Docker Desktop's CLI:
 > `export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"`.
 
-**Frontend** (`ui/`, Next.js — talks directly to the API in the browser, see P6.0 in
-`PLAN.md` for why it can't be proxied through a Vercel function):
+**Frontend** (`ui/`, Next.js — talks directly to the API in the browser rather than
+through a Vercel serverless function, since Vercel's Hobby plan caps function execution
+at 10s and a real, non-cached query takes 12–24s):
 
 ```bash
 cd ui && npm install
@@ -155,15 +156,15 @@ core/     config, clients, logging, retrieval, reranker, cache, agents (LangGrap
 data/     ingestion pipeline (fetch, parse, chunk, contextualize, index)
 eval/     golden-set generation, RAGAS, retrieval metrics, ablation, latency benchmarks
 scripts/  ops scripts: cache pre-warming, keep-alive
-ui/       Next.js chat frontend (P6.4)
+ui/       Next.js chat frontend
 tests/    pytest (unit + integration)
-Dockerfile   production API image (P6.1)
+Dockerfile   production API image
 ```
 
 ## Deployment
 
-**P0–P6 complete.** Every piece — production Docker image, API hardening, the Next.js
-UI, cache pre-warming, a Qdrant keep-alive — is built and verified live.
+Every piece — production Docker image, API hardening, the Next.js UI, cache
+pre-warming, a Qdrant keep-alive — is built and verified live.
 
 **Local (recommended).** Backend + UI both run end-to-end locally at 12–24s real query
 latency, matching every benchmark in this project. See [Quick start](#quick-start).
@@ -173,7 +174,7 @@ Cloud + Redis Cloud instances — correct, but **slow**: real query latency ther
 at 100–240s, a ~15–25× slowdown vs. this project's Apple Silicon dev machine that two
 rounds of real investigation (mode switching, thread-count tuning) couldn't close. Kept
 running as a reference deployment; local is the practical way to actually use it. Full
-investigation and numbers in [`PLAN.md`](PLAN.md) P6.5.
+investigation in [`PRD.md`](PRD.md#6-known-limitations--future-work).
 
 ## Results
 
@@ -190,7 +191,7 @@ Real, reproducible numbers — not placeholders. Reproduce with `make eval`,
 
 **Answer quality** (RAGAS, judge = gpt-4o-mini, n=55 real graph runs — 55/181 of the
 golden set, checkpointed run stopped by Groq's shared daily generation-token quota
-mid-eval; see `PLAN.md` P5.4 for the resumable design and how to extend this):
+mid-eval; see `eval/ragas_eval.py` for the resumable design and how to extend this):
 
 | Metric | Score |
 | :-- | --: |
@@ -207,7 +208,7 @@ the sample, same real story: faithful, well-grounded answers.
 fully establish X") rather than bluff when evidence is weak. Verified in isolation: the
 identical answer scored ~0.73–1.0 with the hedge removed, 0.0 with it present. A real,
 documented blind spot of the metric for honesty-first RAG systems, not a defect here —
-see `PLAN.md` P5.4 for the full trace back to RAGAS's own source.
+see [`PRD.md`](PRD.md#4-evaluation) for the full trace back to RAGAS's own source.
 
 **Ablation** (contextualize_strategy × retrieval mode × reranker, 20-paper sample, n=28):
 
@@ -218,7 +219,7 @@ see `PLAN.md` P5.4 for the full trace back to RAGAS's own source.
 - **Per-chunk contextualization gives a real +10.7pp hit@30 improvement over no
   context in dense-only retrieval** (0.750 → 0.857) — real and worth keeping, though
   currently masked in the full hybrid+rerank pipeline where BM25 already performs
-  near-ceiling. Full 12-cell table in `PLAN.md` P5.5.
+  near-ceiling. Full 12-cell table in [`PRD.md`](PRD.md#4-evaluation).
 
 **Semantic cache**: a repeat query returns in **~28ms** vs. **~12.8s** for a fresh
 graph run — a **~450× speedup**, with zero LLM/retrieval calls on the hit path
@@ -226,9 +227,8 @@ graph run — a **~450× speedup**, with zero LLM/retrieval calls on the hit pat
 
 ## Documentation
 
-- [`PRD.md`](PRD.md) — full product/technical spec
-- [`PLAN.md`](PLAN.md) — phase-by-phase build log, including every real bug found and
-  fixed along the way
+- [`PRD.md`](PRD.md) — design rationale, evaluation methodology, and engineering
+  write-ups
 
 ## License
 

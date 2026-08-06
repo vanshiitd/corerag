@@ -155,8 +155,7 @@ class Settings(BaseSettings):
     # ---- GROBID (ingestion only) --------------------------------------------
     grobid_url: str = "http://localhost:8070"
 
-    # ---- Langfuse (observability; optional; Cloud, not self-hosted -- see
-    # PLAN.md P3 replan) ------------------------------------------------------
+    # ---- Langfuse (observability; optional; Cloud, not self-hosted) ---------
     langfuse_public_key: SecretStr | None = None
     langfuse_secret_key: SecretStr | None = None
     # LANGFUSE_BASE_URL, not LANGFUSE_HOST -- confirmed against langfuse/skills

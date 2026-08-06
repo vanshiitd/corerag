@@ -1,10 +1,10 @@
-"""Pre-warm the semantic cache with representative demo queries (P6.6).
+"""Pre-warm the semantic cache with representative demo queries.
 
 Posts real requests to a running instance's /query endpoint (not a direct
 internal call) so it exercises the exact same code path a real visitor does,
 including the real write-through-to-cache logic in api/routes.py -- a
 reviewer's first click on one of these questions should be a fast cache hit,
-not a cold 12-24s graph run (see PLAN.md P3.8/P4.2 for those real numbers).
+not a cold 12-24s graph run (see PRD.md section 4 for those real numbers).
 
 Run standalone:
     uv run python -m scripts.prewarm_cache                          # localhost:8000

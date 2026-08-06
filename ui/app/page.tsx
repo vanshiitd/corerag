@@ -8,7 +8,7 @@ import type { ChatMessage, Citation, TraceInfo } from "./lib/types";
 
 // Must be called directly from the browser, never proxied through a Vercel
 // serverless function -- Vercel Hobby functions time out at 10s, but a real
-// (non-cached) /query answer legitimately takes 12-24s (PLAN.md P3.8).
+// (non-cached) /query answer legitimately takes 12-24s.
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Real questions this corpus answers well, verified throughout development --
