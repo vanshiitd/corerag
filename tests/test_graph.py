@@ -51,6 +51,31 @@ async def test_graph_answers_a_real_question_with_citations(
 
 
 @pytest.mark.integration
+async def test_graph_grader_does_not_falsely_reject_a_partial_but_ontopic_answer(
+    qdrant: AsyncQdrantClient,
+) -> None:
+    """Real regression case found live in P3.8: this genuinely on-topic question
+    used to exhaust both reflection retries and end low_confidence -- the grader
+    was reading "sufficient to answer well" as "must cover every sub-aspect,"
+    not "is this substantively relevant." Fixed by loosening _GRADER_PROMPT to
+    explicitly accept a partial-but-on-topic answer as a pass. Locks in that fix
+    without weakening the genuine-abstention case above."""
+    settings = get_settings()
+    graph = build_graph(qdrant, settings)
+    query = "how does continuous batching work?"
+
+    result = await graph.ainvoke(
+        {"query": query, "original_query": query, "retries": 0},
+        config={"recursion_limit": 20},
+    )
+
+    assert result["relevant"] is True
+    assert result["low_confidence"] is False
+    assert result.get("retries", 0) == 0
+    assert len(result["citations"]) > 0
+
+
+@pytest.mark.integration
 async def test_graph_off_topic_query_triggers_reflection_then_abstains(
     qdrant: AsyncQdrantClient,
 ) -> None:

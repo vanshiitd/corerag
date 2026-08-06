@@ -18,17 +18,20 @@ from core.retrieval import ScoredChunk
 log = structlog.get_logger()
 
 _GRADER_PROMPT = """You are grading whether retrieved passages from AI-systems research \
-papers are sufficient to answer a user's question.
+papers give a reasonable basis for answering a user's question.
 
 Question: {query}
 
 Retrieved passages:
 {passages}
 
-Decide if these passages, together, contain enough relevant information to answer the \
-question well. If not, propose a single rewritten search query more likely to retrieve \
-what's actually needed (more specific terminology, a different angle, or narrower scope) \
--- otherwise leave rewritten_query empty."""
+Mark relevant=True if the passages substantively engage with the question's core topic, \
+even if they don't cover every detail or sub-aspect -- a partial but genuinely on-topic \
+answer is a pass, not a fail. Mark relevant=False only if the passages are largely \
+off-topic or fail to address what's actually being asked. If not relevant, propose a \
+single rewritten search query more likely to retrieve what's actually needed (more \
+specific terminology, a different angle, or narrower scope) -- otherwise leave \
+rewritten_query empty."""
 
 
 class GradeResult(BaseModel):
