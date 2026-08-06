@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { parseSSE } from "./lib/sse";
-import type { ChatMessage, Citation } from "./lib/types";
+import type { ChatMessage, Citation, TraceInfo } from "./lib/types";
 
 // Must be called directly from the browser, never proxied through a Vercel
 // serverless function -- Vercel Hobby functions time out at 10s, but a real
@@ -43,6 +43,31 @@ function CitationCard({ citation, index }: { citation: Citation; index: number }
   );
 }
 
+function TracePanel({ trace }: { trace: TraceInfo }) {
+  const badges: string[] = [];
+  badges.push(trace.cached ? "cache hit" : "live run");
+  if (trace.route) badges.push(trace.route === "multi_hop" ? "multi-hop route" : "simple route");
+  if (trace.retries) badges.push(`${trace.retries} reflection ${trace.retries === 1 ? "retry" : "retries"}`);
+  if (trace.low_confidence) badges.push("low confidence");
+
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {badges.map((b) => (
+        <span
+          key={b}
+          className={`rounded-full border px-2 py-0.5 text-[11px] ${
+            b === "low confidence"
+              ? "border-amber-300 text-amber-600 dark:border-amber-800 dark:text-amber-500"
+              : "border-zinc-200 text-zinc-400 dark:border-zinc-800 dark:text-zinc-500"
+          }`}
+        >
+          {b}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function Message({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
@@ -75,6 +100,7 @@ function Message({ message }: { message: ChatMessage }) {
               : `${(message.latencyMs / 1000).toFixed(1)}s`}
           </div>
         )}
+        {message.trace && <TracePanel trace={message.trace} />}
       </div>
     </div>
   );
@@ -117,18 +143,23 @@ export default function Home() {
 
       let content = "";
       let citations: Citation[] = [];
+      let trace: TraceInfo | undefined;
       for await (const evt of parseSSE(res)) {
         if (evt.event === "token") {
           content += (evt.data as { content: string }).content;
           setMessages((prev) => updateLast(prev, { content, pending: true }));
         } else if (evt.event === "sources") {
           citations = (evt.data as { citations: Citation[] }).citations;
+        } else if (evt.event === "trace") {
+          trace = evt.data as TraceInfo;
         }
         bottomRef.current?.scrollIntoView({ behavior: "smooth" });
       }
 
       const latencyMs = Math.round(performance.now() - start);
-      setMessages((prev) => updateLast(prev, { content, citations, latencyMs, pending: false }));
+      setMessages((prev) =>
+        updateLast(prev, { content, citations, trace, latencyMs, pending: false }),
+      );
     } catch (err) {
       setMessages((prev) =>
         updateLast(prev, {

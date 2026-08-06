@@ -13,6 +13,17 @@ export interface Citation {
   score: number;
 }
 
+/** Mirrors the /query "trace" SSE event: which path the agent graph took to
+ * produce this answer (cache hit vs. a real run, the router's decision,
+ * how many reflection retries it took, and whether it gave up low-confidence). */
+export interface TraceInfo {
+  cached: boolean;
+  route: "simple" | "multi_hop" | null;
+  retries: number | null;
+  low_confidence: boolean | null;
+  elapsed_ms: number;
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -20,6 +31,8 @@ export interface ChatMessage {
   /** Wall-clock ms from submit to the final `sources` event -- a real,
    * per-answer trace/latency readout, not a simulated number. */
   latencyMs?: number;
+  /** Server-reported routing/reflection path for this answer. */
+  trace?: TraceInfo;
   /** True while a response is still streaming in. */
   pending?: boolean;
   error?: string;
